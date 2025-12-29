@@ -1,6 +1,7 @@
 
 // State
 let currentResults = []; // { class, count, detections: [{box, score}] }
+let currentTextRegions = []; // DBNet results
 let currentThresholds = {}; // { class: 0.5 }
 let currentFile = null; // Store for rerunning
 let imageDims = { w: 0, h: 0 };
@@ -108,6 +109,7 @@ async function handleUpload(file) {
 
         if (data.status === 'success') {
             currentResults = data.results;
+            currentTextRegions = data.text_regions || []; // Default to empty if missing
 
             // Initialize thresholds map if empty
             data.results.forEach(g => {
@@ -184,6 +186,25 @@ function drawDetections() {
     });
 
     document.getElementById('total-count-display').innerText = total;
+
+    // Draw Text Regions (DBNet)
+    if (currentTextRegions && currentTextRegions.length > 0) {
+        const textColor = '#00FF00'; // Bright Green
+        
+        currentTextRegions.forEach(region => {
+            const [x1, y1, x2, y2] = region.box;
+            const w = x2 - x1;
+            const h = y2 - y1;
+            
+            ctx.strokeStyle = textColor;
+            ctx.lineWidth = Math.max(2, imageDims.w / 300);
+            ctx.strokeRect(x1, y1, w, h);
+            
+            // Optional: slight fill
+            ctx.fillStyle = textColor + '22';
+            ctx.fillRect(x1, y1, w, h);
+        });
+    }
 }
 
 // --- Controls ---

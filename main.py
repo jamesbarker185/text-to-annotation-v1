@@ -8,7 +8,15 @@ import os
 from PIL import Image
 import io
 import json
+import sys
+# Fix for sam3 shadowing: prioritized local sam3 package directory
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "sam3"))
+
 from sam3_service import sam3_service
+from dbnet_service import DBNetService
+
+# Initialize DBNet Service
+dbnet_service = DBNetService()
 
 app = FastAPI(title="SAM3 Rapid Platform")
 
@@ -55,6 +63,10 @@ async def detect_objects(
         # Run detection
         results = sam3_service.detect(image, prompt_list)
         
+        # Run Text Detection (DBNet)
+        text_regions = dbnet_service.detect_text(image)
+        print(f"[Info] DBNet found {len(text_regions)} text regions.")
+        
         # Save image temporarily for reference/serving if needed
         # (Optional, but good for debugging or returning URL)
         # temp_name = f"uploads/{file.filename}"
@@ -66,7 +78,8 @@ async def detect_objects(
         return {
             "status": "success",
             "image_dims": {"width": width, "height": height},
-            "results": results
+            "results": results,
+            "text_regions": text_regions
         }
         
     except Exception as e:
@@ -125,4 +138,8 @@ async def batch_detect(
         raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
+    print("\n\n" + "="*50)
+    print(" SAM3 Server is likely starting up...")
+    print(" Once running, access the app at: http://localhost:8095")
+    print("="*50 + "\n")
     uvicorn.run("main:app", host="0.0.0.0", port=8095, reload=True)

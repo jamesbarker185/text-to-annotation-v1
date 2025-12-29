@@ -7,3 +7,8 @@ python-multipart
 Pillow
 numpy
 opencv-python
+einops
+decord
+pycocotools
+python-doctr[torch]
+shapely

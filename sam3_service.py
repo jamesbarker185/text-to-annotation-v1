@@ -48,7 +48,7 @@ class SAM3Service:
                 load_from_HF=False,
                 bpe_path=bpe_path
             )
-            self.processor = Sam3Processor(self.model)
+            self.processor = Sam3Processor(self.model, device=self.device)
             print("SAM3 model loaded successfully.")
         except Exception as e:
             print(f"Failed to load model: {e}")
