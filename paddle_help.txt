@@ -1,0 +1,14 @@
+Version info: <class 'paddleocr._pipelines.ocr.PaddleOCR'>
+Dir(ocr): ['__abstractmethods__', '__class__', '__delattr__', '__dict__', '__dir__', '__doc__', '__eq__', '__format__', '__ge__', '__getattribute__', '__gt__', '__hash__', '__init__', '__init_subclass__', '__le__', '__lt__', '__module__', '__ne__', '__new__', '__reduce__', '__reduce_ex__', '__repr__', '__setattr__', '__sizeof__', '__str__', '__subclasshook__', '__weakref__', '_abc_impl', '_common_args', '_create_paddlex_pipeline', '_get_merged_paddlex_config', '_get_ocr_model_names', '_get_paddlex_config_overrides', '_merged_paddlex_config', '_paddlex_config', '_paddlex_pipeline_name', '_params', 'close', 'export_paddlex_config_to_yaml', 'get_cli_subcommand_executor', 'ocr', 'paddlex_pipeline', 'predict', 'predict_iter']
+
+Help ocr.ocr:
+Help on method ocr in module paddleocr._pipelines.ocr:
+
+ocr(img, **kwargs) method of paddleocr._pipelines.ocr.PaddleOCR instance
+
+
+Help ocr.predict:
+Help on method predict in module paddleocr._pipelines.ocr:
+
+predict(input, *, use_doc_orientation_classify=None, use_doc_unwarping=None, use_textline_orientation=None, text_det_limit_side_len=None, text_det_limit_type=None, text_det_thresh=None, text_det_box_thresh=None, text_det_unclip_ratio=None, text_rec_score_thresh=None, return_word_box=None) method of paddleocr._pipelines.ocr.PaddleOCR instance
+

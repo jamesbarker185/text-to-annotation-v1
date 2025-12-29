@@ -12,3 +12,6 @@ decord
 pycocotools
 python-doctr[torch]
 shapely
+easyocr
+paddlepaddle
+paddleocr

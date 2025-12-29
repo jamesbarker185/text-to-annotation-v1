@@ -2,6 +2,7 @@
 // State
 let currentResults = []; // { class, count, detections: [{box, score}] }
 let currentTextRegions = []; // DBNet results
+let extractedTexts = []; // OCR results {box, text, confidence}
 let currentThresholds = {}; // { class: 0.5 }
 let currentFile = null; // Store for rerunning
 let imageDims = { w: 0, h: 0 };
@@ -40,9 +41,14 @@ const btnBack = document.getElementById('btn-back');
 const batchInput = document.getElementById('batch-input');
 const batchDropArea = document.getElementById('batch-drop-area');
 
+const btnExtractText = document.getElementById('btn-extract-text');
+const ocrModelSelect = document.getElementById('ocr-model-select');
+
 // Listeners
 // dropArea logic handled by input inside it
 fileInput.addEventListener('change', (e) => handleUpload(e.target.files[0]));
+
+btnExtractText.addEventListener('click', runOCR);
 
 btnUpdatePrompts.addEventListener('click', () => {
     if (currentFile) handleUpload(currentFile);
@@ -107,9 +113,28 @@ async function handleUpload(file) {
 
         const data = await response.json();
 
+
         if (data.status === 'success') {
             currentResults = data.results;
             currentTextRegions = data.text_regions || []; // Default to empty if missing
+
+            // Performance Logging
+            if (data.timings) {
+                // Console
+                console.group("🚀 Detection Performance");
+                console.log(`SAM3 Inference:   ${data.timings.sam3.toFixed(4)}s`);
+                console.log(`DBNet Detection:  ${data.timings.dbnet.toFixed(4)}s`);
+                console.log(`Total Time:       ${data.timings.total.toFixed(4)}s`);
+                console.groupEnd();
+
+                // UI
+                const tSam = document.getElementById('time-sam3');
+                const tDb = document.getElementById('time-dbnet');
+                const tTot = document.getElementById('time-total');
+                if (tSam) tSam.innerText = data.timings.sam3.toFixed(3) + 's';
+                if (tDb) tDb.innerText = data.timings.dbnet.toFixed(3) + 's';
+                if (tTot) tTot.innerText = data.timings.total.toFixed(3) + 's';
+            }
 
             // Initialize thresholds map if empty
             data.results.forEach(g => {
@@ -188,10 +213,14 @@ function drawDetections() {
     document.getElementById('total-count-display').innerText = total;
 
     // Draw Text Regions (DBNet)
-    if (currentTextRegions && currentTextRegions.length > 0) {
+    // Draw Text Regions (DBNet + OCR)
+    // If we have extracted text, use that. Otherwise use raw regions.
+    const textData = (extractedTexts && extractedTexts.length > 0) ? extractedTexts : currentTextRegions;
+
+    if (textData && textData.length > 0) {
         const textColor = '#00FF00'; // Bright Green
         
-        currentTextRegions.forEach(region => {
+        textData.forEach(region => {
             const [x1, y1, x2, y2] = region.box;
             const w = x2 - x1;
             const h = y2 - y1;
@@ -203,6 +232,13 @@ function drawDetections() {
             // Optional: slight fill
             ctx.fillStyle = textColor + '22';
             ctx.fillRect(x1, y1, w, h);
+
+            // Draw Text Label if valid
+            if (region.text) {
+                ctx.fillStyle = textColor;
+                ctx.font = `bold ${Math.max(12, h/2)}px Arial`;
+                ctx.fillText(region.text, x1, y1 - 5);
+            }
         });
     }
 }
@@ -316,3 +352,65 @@ function displayBatchResults(summary) {
         grid.appendChild(div);
     });
 }
+
+async function runOCR() {
+    if (!currentFile || !currentTextRegions.length) {
+        alert("No text regions detected to extract from.");
+        return;
+    }
+
+    const btn = document.getElementById('btn-extract-text');
+    const statusDiv = document.getElementById('ocr-status');
+    const listDiv = document.getElementById('ocr-results-list');
+    
+    btn.disabled = true;
+    btn.innerText = "Extracting...";
+    statusDiv.innerText = "Running OCR...";
+    listDiv.innerHTML = '';
+
+    const formData = new FormData();
+    formData.append('file', currentFile);
+    formData.append('regions', JSON.stringify(currentTextRegions));
+    formData.append('model', document.getElementById('ocr-model-select').value);
+
+    try {
+        const response = await fetch('/api/extract-text', {
+            method: 'POST',
+            body: formData
+        });
+        const data = await response.json();
+
+        if (data.status === 'success') {
+            extractedTexts = data.extracted_text;
+            
+            // Stats
+            if (data.perf_stats) {
+                const s = data.perf_stats;
+                console.log(`OCR Layer: Preprocessing=${s.preprocess.toFixed(4)}s, Inference=${s.inference.toFixed(4)}s`);
+                statusDiv.innerText = `Extracted in ${(s.preprocess + s.inference).toFixed(2)}s (${extractedTexts.length} regions)`;
+            } else {
+                statusDiv.innerText = `Extracted text from ${extractedTexts.length} regions.`;
+            }
+
+            // Render list
+            extractedTexts.forEach(item => {
+                const div = document.createElement('div');
+                div.style.padding = "4px 0";
+                div.style.borderBottom = "1px solid #333";
+                div.innerHTML = `<span style="color:#00FF00; font-weight:bold;">${item.text}</span> <span style="color:#888; font-size:0.75em;">(${Math.round(item.confidence*100)}%)</span>`;
+                listDiv.appendChild(div);
+            });
+
+            drawDetections();
+        } else {
+            statusDiv.innerText = "Error: " + JSON.stringify(data);
+        }
+    } catch (e) {
+        console.error(e);
+        statusDiv.innerText = "Failed to run OCR.";
+    } finally {
+        btn.disabled = false;
+        btn.innerText = "Extract Text";
+    }
+}
+

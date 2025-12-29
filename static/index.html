@@ -60,8 +60,34 @@
                             <div class="total-count">Total: <span id="total-count-display">0</span></div>
                         </div>
 
+                        <!-- Performance Stats -->
+                        <div id="perf-stats" class="perf-stats" style="margin-bottom: 20px; font-size: 0.85rem; color: var(--text-secondary); border-bottom: 1px solid var(--border-color); padding-bottom: 10px;">
+                            <div style="display:flex; justify-content:space-between;"><span>SAM3:</span> <span id="time-sam3">-</span></div>
+                            <div style="display:flex; justify-content:space-between;"><span>DBNet:</span> <span id="time-dbnet">-</span></div>
+                            <div style="display:flex; justify-content:space-between; font-weight:bold; color:var(--text-primary); margin-top:4px;">
+                                <span>Total:</span> <span id="time-total">-</span>
+                            </div>
+                        </div>
+
                         <div id="sliders-container" class="sliders-list">
                             <!-- Sliders injected by JS -->
+                        </div>
+
+                        <!-- OCR Section -->
+                        <div class="ocr-section" style="margin-top: 20px; border-top: 1px solid var(--border-color); padding-top: 20px;">
+                            <h3 style="margin-bottom: 10px;">OCR Text Extraction</h3>
+                            <div style="display: flex; gap: 10px; margin-bottom: 10px;">
+                                <select id="ocr-model-select" class="btn btn-secondary" style="flex: 1;">
+                                    <option value="doctr">DocTR (Default)</option>
+                                    <option value="easyocr">EasyOCR</option>
+                                    <option value="paddle">PaddleOCR (SOTA)</option>
+                                </select>
+                                <button class="btn btn-primary" id="btn-extract-text" style="flex: 1;">
+                                    Extract Text
+                                </button>
+                            </div>
+                            <div id="ocr-status" style="font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 10px;"></div>
+                            <div id="ocr-results-list" style="max-height: 150px; overflow-y: auto; font-size: 0.85rem;"></div>
                         </div>
 
                         <div class="batch-actions">
