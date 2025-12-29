@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SAM3 Rapid Annotation</title>
+    <link rel="stylesheet" href="/static/styles.css">
+    <!-- Font for premium feel -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+</head>
+
+<body>
+    <div class="app-container">
+        <header>
+            <div class="logo">SAM3 <span>Rapid</span></div>
+            <div class="status-pill" id="system-status">System Ready</div>
+        </header>
+
+        <main>
+            <!-- Setup & Prompt Section -->
+            <section class="control-panel">
+                <div class="card input-card">
+                    <h2>1. Define Classes</h2>
+                    <p class="subtitle">Enter the objects you want to detect, comma separated.</p>
+                    <div class="input-group">
+                        <input type="text" id="prompt-input" placeholder="e.g. car, person, stop sign" value="cat, dog">
+                        <button id="btn-update-prompts" class="btn btn-sm btn-primary"
+                            style="margin-left: 10px;">Run</button>
+                    </div>
+                </div>
+
+                <div class="card upload-card">
+                    <h2>2. Upload Image</h2>
+                    <p class="subtitle">Upload a single image to tune thresholds.</p>
+                    <div class="file-drop-area" id="drop-area">
+                        <span class="file-msg">Drag & Drop or Click to Upload</span>
+                        <input class="file-input" type="file" id="file-input" accept="image/*">
+                    </div>
+                </div>
+            </section>
+
+            <!-- Viewer & Interactive Section -->
+            <section class="viewer-section hidden" id="viewer-section">
+                <div class="viewer-layout">
+                    <!-- Image Canvas -->
+                    <div class="canvas-container">
+                        <img id="source-image" src="" alt="Source">
+                        <canvas id="overlay-canvas"></canvas>
+                        <div class="loading-overlay hidden" id="loading-overlay">
+                            <div class="spinner"></div>
+                            <span>Running SAM3 Inference...</span>
+                        </div>
+                    </div>
+
+                    <!-- Side Panel: Stats & Sliders -->
+                    <div class="side-panel">
+                        <div class="panel-header">
+                            <h3>Detections</h3>
+                            <div class="total-count">Total: <span id="total-count-display">0</span></div>
+                        </div>
+
+                        <div id="sliders-container" class="sliders-list">
+                            <!-- Sliders injected by JS -->
+                        </div>
+
+                        <div class="batch-actions">
+                            <button class="btn btn-primary" id="btn-run-batch">
+                                Run on Dataset
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Batch Processing Section -->
+            <section class="batch-section hidden" id="batch-section">
+                <div class="card full-width">
+                    <div class="batch-header">
+                        <h2>3. Run on Batch</h2>
+                        <button class="btn btn-secondary" id="btn-back">Back to Tuning</button>
+                    </div>
+                    <p class="subtitle">Upload multiple images to run detection using your current thresholds.</p>
+
+                    <div class="file-drop-area small" id="batch-drop-area">
+                        <span class="file-msg">Select Folder or Multiple Images</span>
+                        <input class="file-input" type="file" id="batch-input" accept="image/*" multiple>
+                    </div>
+
+                    <div id="batch-results" class="batch-results-grid"></div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+
+</html>
