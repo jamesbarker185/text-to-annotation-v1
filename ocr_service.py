@@ -145,22 +145,24 @@ class OCRService:
                     # Return list of (text, conf) tuples
                     result = ocr.ocr(crop_bgr, det=False, cls=True)
                     
-                    # Full raw output log for debugging
-                    # print(f"[Debug] Paddle Raw Result: {result}")
-                    
                     full_text = ""
                     avg_conf = 0.0
                     
                     if result:
-                        # With det=False, result is list of tuples: [('TEXT', 0.99), ...]
-                        # Usually just one tuple for a single crop line
-                        texts = [line[0] for line in result]
-                        confs = [line[1] for line in result]
-                        
-                        full_text = " ".join(texts)
-                        avg_conf = sum(confs) / len(confs)
-                    # else:
-                        # print(f"[Debug] Empty result from Paddle for crop {i}")
+                        # Structure is [[('Text', 0.99)]] or multiple items if multiple lines?
+                        # Usually for det=False on a crop, it returns a list of lists of 1 tuple,
+                        # or just a list of tuples?
+                        # Log showed: [[('SPOT', 0.97...)]] -> list of lists of tuples
+                        try:
+                            # line is [('Text', 0.99)], so line[0] is ('Text', 0.99)
+                            texts = [line[0][0] for line in result]
+                            confs = [line[0][1] for line in result]
+                            
+                            full_text = " ".join(texts)
+                            if confs:
+                                avg_conf = sum(confs) / len(confs)
+                        except Exception as e:
+                             print(f"PaddleOCR parsing error: {e}. Raw: {result}")
                     
                     results.append({
                         "box": valid_regions[i]['box'],
