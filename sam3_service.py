@@ -15,6 +15,9 @@ class SAM3Service:
         print(f"SAM3 Service initialized. Device: {self.device}")
 
 
+    def initialize(self):
+        self.load_model()
+    
     def load_model(self):
         if self.model is not None:
             return
@@ -39,8 +42,8 @@ class SAM3Service:
             if not os.path.exists(bpe_path):
                  print(f"Warning: BPE path not found at {bpe_path}, trying default.")
                  bpe_path = None # Fallback to default logic if my guess is wrong
-            else:
-                 print(f"Using BPE path: {bpe_path}")
+            # else:
+            #      print(f"Using BPE path: {bpe_path}") # Removed as per instruction
 
             self.model = build_sam3_image_model(
                 checkpoint_path=self.model_path,

@@ -188,6 +188,10 @@ async def extract_text_api(
 
 if __name__ == "__main__":
     print("\n\n" + "="*50)
+    print("Loading SAM3 model... this may take a moment.")
+    t_sam_load = time.time()
+    sam3_service.initialize()
+    print(f"SAM3 model loaded successfully in {time.time() - t_sam_load:.2f}s")
     print(" SAM3 Server is likely starting up...")
     print(" Once running, access the app at: http://localhost:8095")
     print("="*50 + "\n")

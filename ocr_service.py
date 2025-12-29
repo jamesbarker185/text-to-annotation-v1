@@ -17,25 +17,31 @@ class OCRService:
         
     def _load_doctr(self):
         if 'doctr' not in self.models:
-            print("Loading Doctr recognition model...")
-            from doctr.models import recognition_predictor
-            # crnn_vgg16_bn is robust, crnn_mobilenet_v3 is faster
-            self.models['doctr'] = recognition_predictor(arch='crnn_vgg16_bn', pretrained=True).to(self.device).eval()
+            print("Loading Doctr model...")
+            t0 = time.time()
+            from doctr.models import ocr_predictor
+            # Pretrained defaults to True
+            self.models['doctr'] = ocr_predictor(pretrained=True).reco_predictor.to(self.device).eval()
+            print(f"Doctr loaded in {time.time() - t0:.2f}s")
     
     def _load_easyocr(self):
         if 'easyocr' not in self.models:
             print("Loading EasyOCR model...")
+            t0 = time.time()
             import easyocr
             # Initialize for English by default, can be extended
             self.models['easyocr'] = easyocr.Reader(['en'], gpu=torch.cuda.is_available())
+            print(f"EasyOCR loaded in {time.time() - t0:.2f}s")
 
     def _load_paddle(self):
         if 'paddle' not in self.models:
             print("Loading PaddleOCR model...")
+            t0 = time.time()
             from paddleocr import PaddleOCR
             # use_angle_cls=True helps with rotated text
             # lang='en' by default
             self.models['paddle'] = PaddleOCR(use_angle_cls=True, lang='en', enable_mkldnn=False)
+            print(f"PaddleOCR loaded in {time.time() - t0:.2f}s")
 
     def extract_text(self, image_input, text_regions, model_name='doctr'):
         """

@@ -9,8 +9,13 @@ class DBNetService:
     def __init__(self):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         print(f"DBNetService initialized. Device: {self.device}")
+        
+        print("Loading DBNet model...")
+        import time
+        t0 = time.time()
         # Initialize pretrained DBNet (ResNet50 backbone)
         self.model = detection_predictor(arch='db_resnet50', pretrained=True).to(self.device).eval()
+        print(f"DBNet model loaded in {time.time() - t0:.2f}s")
 
     def detect_text(self, image_input):
         """
