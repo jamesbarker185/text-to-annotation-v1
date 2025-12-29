@@ -1,8 +1,0 @@
-Traceback (most recent call last):
-  File "C:\Users\jamie.barker\Desktop\GithubProjects\text-to-annotation-v1\debug_paddle_methods.py", line 16, in <module>
-    res = ocr.ocr(img, det=False, cls=True)
-  File "C:\Users\jamie.barker\AppData\Local\Programs\Python\Python310\lib\site-packages\typing_extensions.py", line 3004, in wrapper
-    return arg(*args, **kwargs)
-  File "C:\Users\jamie.barker\AppData\Local\Programs\Python\Python310\lib\site-packages\paddleocr\_pipelines\ocr.py", line 231, in ocr
-    return self.predict(img, **kwargs)
-TypeError: PaddleOCR.predict() got an unexpected keyword argument 'det'
