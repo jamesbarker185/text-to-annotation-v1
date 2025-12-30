@@ -1,57 +1,109 @@
+
 import numpy as np
 import torch
 import time
 from PIL import Image
+from threading import Lock
+from functools import lru_cache
+
+from config import get_settings
+from logger import get_logger, log_performance
+
+settings = get_settings()
+logger = get_logger("ocr_service")
 
 class OCRService:
+    _instance = None
+    _lock = Lock()
+    
+    def __new__(cls):
+        if cls._instance is None:
+            with cls._lock:
+                if cls._instance is None:
+                    cls._instance = super(OCRService, cls).__new__(cls)
+                    cls._instance.initialized = False
+        return cls._instance
+
     def __init__(self):
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        print(f"OCRService initialized. Device: {self.device}")
+        if self.initialized:
+            return
+            
+        self.device = torch.device("cuda" if torch.cuda.is_available() and settings.DEVICE == "cuda" else "cpu")
+        logger.info(f"OCRService initialized. Device: {self.device}")
         
         # Models cache
         self.models = {}
-        self.current_model_name = None
-        
-        # Pre-load default (doctr) or lazy load
-        # We will lazy load to save startup time
+        self.model_locks = {
+            'doctr': Lock(),
+            'easyocr': Lock(),
+            'paddle': Lock()
+        }
+        self.initialized = True
         
     def _load_doctr(self):
-        if 'doctr' not in self.models:
-            print("Loading Doctr model...")
+        if 'doctr' in self.models:
+            return
+
+        with self.model_locks['doctr']:
+            if 'doctr' in self.models:
+                return
+                
+            logger.info("Loading Doctr model...")
             t0 = time.time()
             from doctr.models import ocr_predictor
             # Pretrained defaults to True
             self.models['doctr'] = ocr_predictor(pretrained=True).reco_predictor.to(self.device).eval()
-            print(f"Doctr loaded in {time.time() - t0:.2f}s")
+            log_performance(logger, "Doctr Load", time.time() - t0)
     
     def _load_easyocr(self):
-        if 'easyocr' not in self.models:
-            print("Loading EasyOCR model...")
+        if 'easyocr' in self.models:
+            return
+
+        with self.model_locks['easyocr']:
+            if 'easyocr' in self.models:
+                return
+
+            logger.info("Loading EasyOCR model...")
             t0 = time.time()
             import easyocr
-            # Initialize for English by default, can be extended
-            self.models['easyocr'] = easyocr.Reader(['en'], gpu=torch.cuda.is_available())
-            print(f"EasyOCR loaded in {time.time() - t0:.2f}s")
+            self.models['easyocr'] = easyocr.Reader(['en'], gpu=(self.device.type == 'cuda'))
+            log_performance(logger, "EasyOCR Load", time.time() - t0)
 
     def _load_paddle(self):
-        if 'paddle' not in self.models:
-            print("Loading PaddleOCR model...")
+        if 'paddle' in self.models:
+            return
+
+        with self.model_locks['paddle']:
+            if 'paddle' in self.models:
+                return
+
+            logger.info("Loading PaddleOCR model...")
             t0 = time.time()
+            
+            # Explicitly disable MKLDNN via environment variables and flags
+            import os
+            os.environ["FLAGS_use_mkldnn"] = "0"
+            os.environ["DN_ENABLE_ONEDNN"] = "0"
+
+            try:
+                import paddle
+                paddle.set_flags({'FLAGS_use_mkldnn': False})
+                logger.info(f"Paddle flags: {paddle.get_flags(['FLAGS_use_mkldnn'])}")
+            except ImportError:
+                logger.warning("Could not import paddle to set flags")
+
             from paddleocr import PaddleOCR
             # use_angle_cls=True helps with rotated text
             # lang='en' by default
-            self.models['paddle'] = PaddleOCR(use_angle_cls=True, lang='en', enable_mkldnn=False)
-            print(f"PaddleOCR loaded in {time.time() - t0:.2f}s")
+            # Paddle uses its own GPU check usually, but we can hint
+            use_gpu = (self.device.type == 'cuda')
+            logger.info(f"Initializing PaddleOCR with use_gpu={use_gpu}, enable_mkldnn=False, det=False, rec_batch_num=1")
+            self.models['paddle'] = PaddleOCR(use_angle_cls=True, lang='en', use_gpu=use_gpu, enable_mkldnn=False, det=False, rec_batch_num=1)
+            log_performance(logger, "PaddleOCR Load", time.time() - t0)
 
     def extract_text(self, image_input, text_regions, model_name='doctr'):
         """
         Extract text from provided regions in the image.
-        Args:
-            image_input: PIL Image or numpy array
-            text_regions: List of dicts {'box': [x1, y1, x2, y2]}
-            model_name: 'doctr' or 'easyocr'
-        Returns:
-            List of dicts: [{'box':..., 'text': "...", 'confidence': 0.9}]
         """
         if not text_regions:
             return [], {}
@@ -93,103 +145,112 @@ class OCRService:
         if not crops:
             return [], {}
 
-        if model_name == 'doctr':
-            self._load_doctr()
-            # Doctr recognition_predictor expects list of numpy arrays
-            # Output: list of objects with .value and .confidence
-            out = self.models['doctr'](crops)
-            
-            for i, word_out in enumerate(out):
-                text, confidence = word_out[0], word_out[1]
-                results.append({
-                    "box": valid_regions[i]['box'],
-                    "text": text,
-                    "confidence": float(confidence)
-                })
+        try:
+            if model_name == 'doctr':
+                self._load_doctr()
+                # Doctr recognition_predictor expects list of numpy arrays
+                out = self.models['doctr'](crops)
                 
-        elif model_name == 'easyocr':
-            self._load_easyocr()
-            reader = self.models['easyocr']
+                for i, word_out in enumerate(out):
+                    text, confidence = word_out[0], word_out[1]
+                    results.append({
+                        "box": valid_regions[i]['box'],
+                        "text": text,
+                        "confidence": float(confidence)
+                    })
+                    
+            elif model_name == 'easyocr':
+                self._load_easyocr()
+                reader = self.models['easyocr']
+                
+                for i, crop in enumerate(crops):
+                    try:
+                        ocr_res = reader.readtext(crop, detail=1)
+                        full_text = " ".join([res[1] for res in ocr_res])
+                        avg_conf = 0.0
+                        if ocr_res:
+                            avg_conf = sum([res[2] for res in ocr_res]) / len(ocr_res)
+                        
+                        results.append({
+                            "box": valid_regions[i]['box'],
+                            "text": full_text,
+                            "confidence": float(avg_conf)
+                        })
+                    except Exception as e:
+                        logger.warning(f"EasyOCR error on crop {i}: {e}")
+                        results.append({
+                            "box": valid_regions[i]['box'],
+                            "text": "",
+                            "confidence": 0.0
+                        })
             
-            for i, crop in enumerate(crops):
-                try:
-                    ocr_res = reader.readtext(crop, detail=1)
-                    full_text = " ".join([res[1] for res in ocr_res])
-                    avg_conf = 0.0
-                    if ocr_res:
-                        avg_conf = sum([res[2] for res in ocr_res]) / len(ocr_res)
-                    
-                    results.append({
-                        "box": valid_regions[i]['box'],
-                        "text": full_text,
-                        "confidence": float(avg_conf)
-                    })
-                except Exception as e:
-                    print(f"EasyOCR error on crop {i}: {e}")
-                    results.append({
-                        "box": valid_regions[i]['box'],
-                        "text": "",
-                        "confidence": 0.0
-                    })
-        
-        elif model_name == 'paddle':
-            self._load_paddle()
-            ocr = self.models['paddle']
+            elif model_name == 'paddle':
+                self._load_paddle()
+                ocr = self.models['paddle']
+                
+                for i, crop in enumerate(crops):
+                    try:
+                        # PaddleOCR expects BGR format for numpy arrays
+                        crop_bgr = crop[..., ::-1]
+                        
+                        # Run ONLY classification and recognition
+                        result = ocr.ocr(crop_bgr, det=False, cls=True)
+                        
+                        full_text = ""
+                        avg_conf = 0.0
+                        
+                        if result:
+                            # result format is usually [[('Text', 0.99), ...]]
+                            try:
+                                # Flatten if list of lists
+                                if isinstance(result[0], list):
+                                    line_res = result[0]
+                                else:
+                                    line_res = result # Just in case structure varies
+                                
+                                # Safe extraction
+                                texts = []
+                                confs = []
+                                pass_items = line_res if line_res else []
+                                for item in pass_items:
+                                    if item is not None and len(item) >= 2:
+                                        texts.append(item[0])
+                                        confs.append(item[1])
+                                
+                                full_text = " ".join(texts)
+                                if confs:
+                                    avg_conf = sum(confs) / len(confs)
+                                        
+                            except Exception as e:
+                                 logger.warning(f"PaddleOCR parsing warning: {e}. Raw: {result}")
+                        
+                        results.append({
+                            "box": valid_regions[i]['box'],
+                            "text": full_text,
+                            "confidence": float(avg_conf)
+                        })
+                        
+                    except Exception as e:
+                        logger.warning(f"PaddleOCR error on crop {i}: {e}")
+                        results.append({
+                            "box": valid_regions[i]['box'],
+                            "text": "",
+                            "confidence": 0.0
+                        })
             
-            for i, crop in enumerate(crops):
-                try:
-                    # PaddleOCR expects BGR format for numpy arrays
-                    # Current 'crop' is RGB (from PIL)
-                    # Convert RGB -> BGR
-                    crop_bgr = crop[..., ::-1]
-                    
-                    # Log shape for debugging (first run only maybe? or on error)
-                    # print(f"[Debug] Paddle Input Shape: {crop_bgr.shape}")
-                    
-                    # Run ONLY classification (optional) and recognition. Disable detection.
-                    # This is critical because we are feeding it tight crops from DBNet.
-                    # Return list of (text, conf) tuples
-                    result = ocr.ocr(crop_bgr, det=False, cls=True)
-                    
-                    full_text = ""
-                    avg_conf = 0.0
-                    
-                    if result:
-                        # Structure is [[('Text', 0.99)]] or multiple items if multiple lines?
-                        # Usually for det=False on a crop, it returns a list of lists of 1 tuple,
-                        # or just a list of tuples?
-                        # Log showed: [[('SPOT', 0.97...)]] -> list of lists of tuples
-                        try:
-                            # line is [('Text', 0.99)], so line[0] is ('Text', 0.99)
-                            texts = [line[0][0] for line in result]
-                            confs = [line[0][1] for line in result]
-                            
-                            full_text = " ".join(texts)
-                            if confs:
-                                avg_conf = sum(confs) / len(confs)
-                        except Exception as e:
-                             print(f"PaddleOCR parsing error: {e}. Raw: {result}")
-                    
-                    results.append({
-                        "box": valid_regions[i]['box'],
-                        "text": full_text,
-                        "confidence": float(avg_conf)
-                    })
-                    
-                except Exception as e:
-                    print(f"PaddleOCR error on crop {i}: {e}")
-                    results.append({
-                        "box": valid_regions[i]['box'],
-                        "text": "",
-                        "confidence": 0.0
-                    })
-        
-        else:
-            raise ValueError(f"Unknown model name: {model_name}")
+            else:
+                raise ValueError(f"Unknown model name: {model_name}")
+
+        except Exception as e:
+            logger.error(f"OCR Inference Error ({model_name}): {e}", exc_info=True)
+            raise e
 
         t_inference = time.time() - t1
         
-        print(f"[OCR Service] Model: {model_name} | Preprocess: {t_preprocess:.4f}s | Inference: {t_inference:.4f}s")
+        log_performance(logger, f"OCR ({model_name})", t_inference, {
+            "crops": len(crops),
+            "preprocess": f"{t_preprocess:.4f}s"
+        })
         
         return results, {
             "preprocess": t_preprocess,

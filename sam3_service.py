@@ -1,49 +1,82 @@
+
 import os
 import torch
 from PIL import Image
 import numpy as np
+from threading import Lock
 
 from sam3.model_builder import build_sam3_image_model
 from sam3.model.sam3_image_processor import Sam3Processor
+from config import get_settings
+from logger import get_logger, log_performance
+import time
+
+settings = get_settings()
+logger = get_logger("sam3_service")
 
 class SAM3Service:
-    def __init__(self, model_checkpoint_path="sam3/sam3.pt"):
+    _instance = None
+    _lock = Lock()
+
+    def __new__(cls):
+        if cls._instance is None:
+            with cls._lock:
+                if cls._instance is None:
+                    cls._instance = super(SAM3Service, cls).__new__(cls)
+                    cls._instance.initialized = False
+        return cls._instance
+
+    def __init__(self):
+        if self.initialized:
+            return
+            
         self.model = None
         self.processor = None
-        self.model_path = model_checkpoint_path
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
-        print(f"SAM3 Service initialized. Device: {self.device}")
+        self.model_path = settings.SAM3_CHECKPOINT
+        # Fix: Prioritize 'cuda' if available, otherwise 'cpu'. 
+        # The settings.DEVICE might be set to 'cuda', but if no cuda available, fallback.
+        if settings.DEVICE == "cuda" and not torch.cuda.is_available():
+            logger.warning("CUDA requested but not available. Falling back to CPU.")
+            self.device = "cpu"
+        else:
+            self.device = settings.DEVICE
+            
+        logger.info(f"SAM3 Service initialized. Target Device: {self.device}")
+        self.initialized = True
+        self.load_lock = Lock()
 
-
-    def initialize(self):
-        self.load_model()
-    
-    def load_model(self):
+    def ensure_model_loaded(self):
+        """Thread-safe model loading"""
         if self.model is not None:
             return
 
+        with self.load_lock:
+            if self.model is not None:
+                return
+                
+            logger.info("Loading SAM3 model... this may take a moment.")
+            t0 = time.time()
+            self._load_model_internal()
+            duration = time.time() - t0
+            log_performance(logger, "SAM3 Model Load", duration)
+
+    def _load_model_internal(self):
         if not os.path.exists(self.model_path):
-            raise FileNotFoundError(
+            error_msg = (
                 f"Model checkpoint not found at {self.model_path}. "
                 "Please download it from Hugging Face: https://huggingface.co/facebook/sam3"
             )
+            logger.error(error_msg)
+            raise FileNotFoundError(error_msg)
 
-        print("Loading SAM3 model... this may take a moment.")
-        
         try:
-            # Fix: Use correct argument 'checkpoint_path' and disable HF download
-            # Also manually pass bpe_path to avoid NoneType error from pkg_resources
-            
             # Calculate absolute path to BPE file
-            # Assumes structure: project_root/sam3/sam3/assets/bpe...
             base_dir = os.path.dirname(os.path.abspath(__file__))
             bpe_path = os.path.join(base_dir, "sam3", "sam3", "assets", "bpe_simple_vocab_16e6.txt.gz")
             
             if not os.path.exists(bpe_path):
-                 print(f"Warning: BPE path not found at {bpe_path}, trying default.")
-                 bpe_path = None # Fallback to default logic if my guess is wrong
-            # else:
-            #      print(f"Using BPE path: {bpe_path}") # Removed as per instruction
+                 logger.warning(f"BPE path not found at {bpe_path}, relying on default fallback.")
+                 bpe_path = None
 
             self.model = build_sam3_image_model(
                 checkpoint_path=self.model_path,
@@ -52,85 +85,63 @@ class SAM3Service:
                 bpe_path=bpe_path
             )
             self.processor = Sam3Processor(self.model, device=self.device)
-            print("SAM3 model loaded successfully.")
+            logger.info("SAM3 model loaded successfully.")
         except Exception as e:
-            print(f"Failed to load model: {e}")
+            logger.error(f"Failed to load model: {e}", exc_info=True)
             raise e
 
     def detect(self, image: Image.Image, text_prompts: list[str]):
         """
         Run detection on an image for a list of text prompts.
-        Returns a structured dictionary of results.
         """
-        self.load_model()
+        self.ensure_model_loaded()
         
-        # SAM3 typically takes one prompt string. 
-        # If we have multiple classes like ["cat", "dog"], we might need to join them 
-        # or run them separately depending on how SAM3 handles "concepts".
-        # The paper says "Segment Anything with Concepts".
-        # Let's try sending them as a single string "cat. dog." or run loop.
-        # For robustness and individual confidence control, running loop or 
-        # if SAM3 supports list, using that is better. 
-        # README example: prompt="<YOUR_TEXT_PROMPT>"
-        
+        t0 = time.time()
         results = []
         
-        inference_state = self.processor.set_image(image)
-        
-        for class_name in text_prompts:
-            # Run inference for this specific class concept
-            output = self.processor.set_text_prompt(
-                state=inference_state, 
-                prompt=class_name
-            )
+        try:
+            inference_state = self.processor.set_image(image)
             
-            # Output keys: "masks", "boxes", "scores"
-            # masks: [N, H, W] bool?
-            # boxes: [N, 4]
-            # scores: [N]
-            
-            masks = output["masks"]
-            boxes = output["boxes"]
-            scores = output["scores"]
-            
-            # Convert to friendly format
-            # We'll rely on the caller to convert to JSON serializable
-            
-            # Check if tensors, move to cpu/numpy
-            if isinstance(boxes, torch.Tensor):
-                boxes = boxes.cpu().numpy().tolist()
-            if isinstance(scores, torch.Tensor):
-                scores = scores.cpu().numpy().tolist()
+            for class_name in text_prompts:
+                # Run inference for this specific class concept
+                output = self.processor.set_text_prompt(
+                    state=inference_state, 
+                    prompt=class_name
+                )
                 
-            # Masks are heavy to send as JSON. RLE (Run Length Encoding) or simplified polygons are better.
-            # For this "Simple Platform", sending b64 encoded small mask 
-            # or just bounding boxes first is easier.
-            # But user wants specific visual feedback.
-            # Let's convert masks to simple polygons or leave as is if handling backend rendering?
-            # The plan says "frontend ... detection visualization". 
-            # Typically easier to send [x,y,w,h] and a score to frontend for box.
-            # For segmentation mask, generating a colored overlay on backend or sending polygon points.
-            # Let's stick to Boxes + Scores + Counts first as per requirements for "Rapid".
-            # "Rapid" focuses on detection counting.
-            
-            count = len(scores)
-            
-            class_result = {
-                "class": class_name,
-                "count": count,
-                "detections": []
-            }
-            
-            for i in range(count):
-                det = {
-                    "box": boxes[i], # [x1, y1, x2, y2] usually
-                    "score": float(scores[i]),
-                    # "mask": ... # Skip heavy mask data for initial JSON unless needed
+                masks = output["masks"]
+                boxes = output["boxes"]
+                scores = output["scores"]
+                
+                # Check if tensors, move to cpu/numpy
+                if isinstance(boxes, torch.Tensor):
+                    boxes = boxes.cpu().numpy().tolist()
+                if isinstance(scores, torch.Tensor):
+                    scores = scores.cpu().numpy().tolist()
+                    
+                count = len(scores)
+                
+                class_result = {
+                    "class": class_name,
+                    "count": count,
+                    "detections": []
                 }
-                class_result["detections"].append(det)
                 
-            results.append(class_result)
+                for i in range(count):
+                    det = {
+                        "box": boxes[i], # [x1, y1, x2, y2]
+                        "score": float(scores[i]),
+                    }
+                    class_result["detections"].append(det)
+                    
+                results.append(class_result)
             
-        return results
+            log_performance(logger, "SAM3 Inference", time.time() - t0, {"prompts": len(text_prompts)})
+            return results
+            
+        except Exception as e:
+            logger.error(f"Error during SAM3 detection: {e}", exc_info=True)
+            raise e
 
+# Singleton instance
 sam3_service = SAM3Service()
